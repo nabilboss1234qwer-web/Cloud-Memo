@@ -1,36 +1,68 @@
-name: Android APK Build
+
+name: Build Android APK from ZIP
 
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    paths:
+      - '*.zip'
+
+permissions:
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Setup JDK
+      - name: Find and Extract ZIP
+        run: |
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "No ZIP file found!"
+            exit 1
+          fi
+
+          mkdir -p extracted
+          unzip -q "$ZIP_FILE" -d extracted
+
+          echo "ZIP extracted successfully"
+
+      - name: Locate Android Project
+        run: |
+          PROJECT_DIR=$(find extracted -name gradlew -type f \
+            -printf '%h\n' | head -n 1)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "Android Gradle project not found!"
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> $GITHUB_ENV
+
+      - name: Set Up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Android SDK
+      - name: Set Up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Grant Permission
-        run: chmod +x gradlew
+      - name: Grant Gradle Permission
+        run: chmod +x "$PROJECT_DIR/gradlew"
 
-      - name: Build APK
-        run: ./gradlew assembleDebug
+      - name: Build Debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Android-APK
-          path: app/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
